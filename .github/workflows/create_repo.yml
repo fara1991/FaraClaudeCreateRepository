@@ -2,7 +2,7 @@ name: Create Repository from Issue
 
 on:
   issues:
-    types: [labeled]
+    types: [opened]
 
 permissions:
   contents: read
