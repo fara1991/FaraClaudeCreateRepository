@@ -1,0 +1,2 @@
+# FaraCreateRepositoryByClaude
+思いついたアイデアをclaudeに読ませてGithubリポジトリを作ってもらうためのリポジトリ
