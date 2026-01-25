@@ -1,7 +1,6 @@
 name: 新しいプロジェクトをリクエスト
 description: Claudeに新しいプロジェクトを作成してもらう
 title: "[PROJECT] "
-labels: ["create_repo"]
 body:
   - type: markdown
     attributes:
@@ -64,7 +63,6 @@ body:
         - 優先度設定
         - 期限管理
         - ダークモード対応
-      value: ""
     validations:
       required: true
       
