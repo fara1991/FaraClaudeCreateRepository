@@ -1,225 +1,232 @@
 name: Create Repository from Issue
 
 on:
-  issues:
-    types: [opened, labeled]
+issues:
+types: [opened, labeled]
 
 jobs:
-  create-repo:
-    runs-on: ubuntu-latest
-    if: |
-      contains(github.event.issue.labels.*.name, 'create-repo') &&
-      github.event.issue.user.login == github.repository_owner
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+create-repo:
+runs-on: ubuntu-latest
+if: contains(github.event.issue.labels.*.name, ‘create-repo’) && github.event.issue.user.login == github.repository_owner
+
+```
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+  
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '20'
+  
+  - name: Parse issue body
+    id: parse-issue
+    env:
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    run: |
+      cat > parse-issue.js << 'SCRIPT'
+      const issueBody = process.env.ISSUE_BODY;
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      const extractField = (label) => {
+        const regex = new RegExp(`### ${label}\\s*([\\s\\S]*?)(?=\\n###|$)`, 'i');
+        const match = issueBody.match(regex);
+        return match ? match[1].trim() : '';
+      };
       
-      - name: Parse issue body
-        id: parse-issue
-        env:
-          ISSUE_BODY: ${{ github.event.issue.body }}
-        run: |
-          cat > parse-issue.js << 'SCRIPT'
-          const issueBody = process.env.ISSUE_BODY;
-          
-          const extractField = (label) => {
-            const regex = new RegExp(`### ${label}\\s*([\\s\\S]*?)(?=\\n###|$)`, 'i');
-            const match = issueBody.match(regex);
-            return match ? match[1].trim() : '';
-          };
-          
-          const repoName = extractField('リポジトリ名');
-          const projectType = extractField('プロジェクトタイプ');
-          const techStack = extractField('技術スタック');
-          const description = extractField('プロジェクトの説明');
-          const features = extractField('必要な機能（任意）');
-          const visibility = extractField('リポジトリの公開設定');
-          const license = extractField('ライセンス');
-          const notes = extractField('その他の要望（任意）');
-          
-          const prompt = `
+      const repoName = extractField('リポジトリ名');
+      const projectType = extractField('プロジェクトタイプ');
+      const techStack = extractField('技術スタック');
+      const description = extractField('プロジェクトの説明');
+      const features = extractField('必要な機能（任意）');
+      const visibility = extractField('リポジトリの公開設定');
+      const license = extractField('ライセンス');
+      const notes = extractField('その他の要望（任意）');
+      
+      const prompt = `
+```
+
 # プロジェクト作成リクエスト
 
 ## 基本情報
+
 - リポジトリ名: ${repoName}
 - プロジェクトタイプ: ${projectType}
 - 技術スタック: ${techStack}
 - ライセンス: ${license}
 
 ## プロジェクトの説明
+
 ${description}
 
-${features ? `## 必要な機能\n${features}` : ''}
+${features ? `## 必要な機能\n${features}` : ‘’}
 
-${notes ? `## その他の要望\n${notes}` : ''}
+${notes ? `## その他の要望\n${notes}` : ‘’}
 
 完全に動作するプロジェクトを作成してください。
 README.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。
 `;
-          
-          console.log(JSON.stringify({
-            repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
-            visibility: visibility.includes('プライベート') ? 'private' : 'public',
-            prompt: prompt
-          }));
-          SCRIPT
-          
-          PARSED=$(node parse-issue.js)
-          echo "data<<EOF" >> $GITHUB_OUTPUT
-          echo "$PARSED" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+
+```
+      console.log(JSON.stringify({
+        repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
+        visibility: visibility.includes('プライベート') ? 'private' : 'public',
+        prompt: prompt
+      }));
+      SCRIPT
       
-      - name: Call Claude API
-        id: claude
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
-          
-          cat > call-claude.js << 'SCRIPT'
-          const https = require('https');
-          
-          const prompt = process.env.PROMPT;
-          
-          const requestData = JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 8000,
-            messages: [{
-              role: "user",
-              content: `${prompt}
+      PARSED=$(node parse-issue.js)
+      echo "data<<EOF" >> $GITHUB_OUTPUT
+      echo "$PARSED" >> $GITHUB_OUTPUT
+      echo "EOF" >> $GITHUB_OUTPUT
+  
+  - name: Call Claude API
+    id: claude
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    run: |
+      PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
+      
+      cat > call-claude.js << 'SCRIPT'
+      const https = require('https');
+      
+      const prompt = process.env.PROMPT;
+      
+      const requestData = JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 8000,
+        messages: [{
+          role: "user",
+          content: `${prompt}
+```
 
 以下のJSON形式で出力してください（JSONのみ、説明不要）:
 
 {
-  "repo_name": "リポジトリ名",
-  "description": "1行の説明",
-  "files": {
-    "README.md": "内容",
-    "src/index.js": "内容"
-  }
+“repo_name”: “リポジトリ名”,
+“description”: “1行の説明”,
+“files”: {
+“README.md”: “内容”,
+“src/index.js”: “内容”
+}
 }`
-            }]
-          });
-          
-          const options = {
-            hostname: 'api.anthropic.com',
-            port: 443,
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(requestData),
-              'x-api-key': process.env.ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
+}]
+});
+
+```
+      const options = {
+        hostname: 'api.anthropic.com',
+        port: 443,
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(requestData),
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      };
+      
+      const req = https.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          try {
+            const response = JSON.parse(body);
+            const content = response.content[0].text;
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              console.log(JSON.stringify(parsed, null, 2));
+            } else {
+              console.error('JSON not found');
+              process.exit(1);
             }
-          };
-          
-          const req = https.request(options, (res) => {
-            let body = '';
-            res.on('data', (chunk) => body += chunk);
-            res.on('end', () => {
-              try {
-                const response = JSON.parse(body);
-                const content = response.content[0].text;
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  const parsed = JSON.parse(jsonMatch[0]);
-                  console.log(JSON.stringify(parsed, null, 2));
-                } else {
-                  console.error('JSON not found');
-                  process.exit(1);
-                }
-              } catch (e) {
-                console.error('Error:', e.message);
-                process.exit(1);
-              }
-            });
-          });
-          
-          req.on('error', (e) => {
-            console.error('Request error:', e.message);
+          } catch (e) {
+            console.error('Error:', e.message);
             process.exit(1);
-          });
-          
-          req.write(requestData);
-          req.end();
-          SCRIPT
-          
-          export PROMPT="$PROMPT"
-          CLAUDE_OUTPUT=$(node call-claude.js)
-          
-          echo "output<<EOF" >> $GITHUB_OUTPUT
-          echo "$CLAUDE_OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          }
+        });
+      });
       
-      - name: Create repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
-          VISIBILITY: ${{ fromJSON(steps.parse-issue.outputs.data).visibility }}
-        run: |
-          REPO_NAME=$(echo "$CLAUDE_OUTPUT" | jq -r '.repo_name')
-          REPO_DESC=$(echo "$CLAUDE_OUTPUT" | jq -r '.description')
-          
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/user/repos \
-            -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false)}"
-          
-          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+      req.on('error', (e) => {
+        console.error('Request error:', e.message);
+        process.exit(1);
+      });
       
-      - name: Clone and setup repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
-        run: |
-          REPO_NAME="${{ env.REPO_NAME }}"
-          
-          git config --global user.name "Claude Bot"
-          git config --global user.email "claude-bot@github-actions"
-          
-          mkdir -p /tmp/new-repo
-          cd /tmp/new-repo
-          git init
-          git branch -M main
-          
-          echo "$CLAUDE_OUTPUT" | jq -r '.files | to_entries[] | @json' | while read -r entry; do
-            filepath=$(echo "$entry" | jq -r '.key')
-            content=$(echo "$entry" | jq -r '.value')
-            mkdir -p "$(dirname "$filepath")"
-            echo "$content" > "$filepath"
-          done
-          
-          git add .
-          git commit -m "Initial commit from Issue #${{ github.event.issue.number }}"
-          git remote add origin "https://$GITHUB_TOKEN@github.com/${{ github.repository_owner }}/$REPO_NAME.git"
-          git push -u origin main
-          
-          echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
+      req.write(requestData);
+      req.end();
+      SCRIPT
       
-      - name: Comment on issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const repoUrl = process.env.REPO_URL;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\nClaudeによって自動生成されました。`
-            });
-            
-            await github.rest.issues.update({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'closed'
-            });
+      export PROMPT="$PROMPT"
+      CLAUDE_OUTPUT=$(node call-claude.js)
+      
+      echo "output<<EOF" >> $GITHUB_OUTPUT
+      echo "$CLAUDE_OUTPUT" >> $GITHUB_OUTPUT
+      echo "EOF" >> $GITHUB_OUTPUT
+  
+  - name: Create repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
+      VISIBILITY: ${{ fromJSON(steps.parse-issue.outputs.data).visibility }}
+    run: |
+      REPO_NAME=$(echo "$CLAUDE_OUTPUT" | jq -r '.repo_name')
+      REPO_DESC=$(echo "$CLAUDE_OUTPUT" | jq -r '.description')
+      
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        https://api.github.com/user/repos \
+        -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false)}"
+      
+      echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+  
+  - name: Clone and setup repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
+    run: |
+      REPO_NAME="${{ env.REPO_NAME }}"
+      
+      git config --global user.name "Claude Bot"
+      git config --global user.email "claude-bot@github-actions"
+      
+      mkdir -p /tmp/new-repo
+      cd /tmp/new-repo
+      git init
+      git branch -M main
+      
+      echo "$CLAUDE_OUTPUT" | jq -r '.files | to_entries[] | @json' | while read -r entry; do
+        filepath=$(echo "$entry" | jq -r '.key')
+        content=$(echo "$entry" | jq -r '.value')
+        mkdir -p "$(dirname "$filepath")"
+        echo "$content" > "$filepath"
+      done
+      
+      git add .
+      git commit -m "Initial commit from Issue #${{ github.event.issue.number }}"
+      git remote add origin "https://$GITHUB_TOKEN@github.com/${{ github.repository_owner }}/$REPO_NAME.git"
+      git push -u origin main
+      
+      echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
+  
+  - name: Comment on issue
+    uses: actions/github-script@v7
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      script: |
+        const repoUrl = process.env.REPO_URL;
+        await github.rest.issues.createComment({
+          issue_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\nClaudeによって自動生成されました。`
+        });
+        
+        await github.rest.issues.update({
+          issue_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          state: 'closed'
+        });
+```
