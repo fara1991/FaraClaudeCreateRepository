@@ -1,4 +1,4 @@
-# FaraCreateRepositoryByClaude
+# FaraClaudeCreateRepository
 
 AIが自動でプロジェクトを作成するシステム
 
