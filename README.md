@@ -1,4 +1,4 @@
-# 🤖 Claude Repository Creator
+# 🤖 Fara Claude Repository Creator
 
 AIが自動でプロジェクトを作成するシステムです。Issueを作成するだけで、Claudeが完全なプロジェクトを生成し、新しいGitHubリポジトリを自動作成します。
 
