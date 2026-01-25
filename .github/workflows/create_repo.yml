@@ -23,11 +23,11 @@ jobs:
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          cat > parse-issue.js << 'SCRIPT'
+          cat > parse-issue.js << 'ENDOFSCRIPT'
           const issueBody = process.env.ISSUE_BODY;
           
           const extractField = (label) => {
-            const regex = new RegExp(`### ${label}\\s*([\\s\\S]*?)(?=\\n###|$)`, 'i');
+            const regex = new RegExp('### ' + label + '\\s*([\\s\\S]*?)(?=\\n###|$)', 'i');
             const match = issueBody.match(regex);
             return match ? match[1].trim() : '';
           };
@@ -41,32 +41,14 @@ jobs:
           const license = extractField('ライセンス');
           const notes = extractField('その他の要望（任意）');
           
-          const prompt = `
-# プロジェクト作成リクエスト
-
-## 基本情報
-- リポジトリ名: ${repoName}
-- プロジェクトタイプ: ${projectType}
-- 技術スタック: ${techStack}
-- ライセンス: ${license}
-
-## プロジェクトの説明
-${description}
-
-${features ? `## 必要な機能\n${features}` : ''}
-
-${notes ? `## その他の要望\n${notes}` : ''}
-
-完全に動作するプロジェクトを作成してください。
-README.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。
-`;
+          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n';
           
           console.log(JSON.stringify({
             repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
             visibility: visibility.includes('プライベート') ? 'private' : 'public',
-            prompt: prompt
+            prompt: promptText
           }));
-          SCRIPT
+          ENDOFSCRIPT
           
           PARSED=$(node parse-issue.js)
           echo "data<<EOF" >> $GITHUB_OUTPUT
@@ -80,7 +62,7 @@ README.mdには詳細なセットアップ手順とプロジェクトの説明�
         run: |
           PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
           
-          cat > call-claude.js << 'SCRIPT'
+          cat > call-claude.js << 'ENDOFSCRIPT'
           const https = require('https');
           
           const prompt = process.env.PROMPT;
@@ -90,18 +72,7 @@ README.mdには詳細なセットアップ手順とプロジェクトの説明�
             max_tokens: 8000,
             messages: [{
               role: "user",
-              content: `${prompt}
-
-以下のJSON形式で出力してください（JSONのみ、説明不要）:
-
-{
-  "repo_name": "リポジトリ名",
-  "description": "1行の説明",
-  "files": {
-    "README.md": "内容",
-    "src/index.js": "内容"
-  }
-}`
+              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    "src/index.js": "内容"\n  }\n}'
             }]
           });
           
@@ -147,7 +118,7 @@ README.mdには詳細なセットアップ手順とプロジェクトの説明�
           
           req.write(requestData);
           req.end();
-          SCRIPT
+          ENDOFSCRIPT
           
           export PROMPT="$PROMPT"
           CLAUDE_OUTPUT=$(node call-claude.js)
