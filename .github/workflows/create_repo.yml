@@ -45,7 +45,7 @@ jobs:
           const license = extractField('ライセンス');
           const notes = extractField('その他の要望（任意）');
           
-          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが自動でコードを書いてPull Requestを作成する機能です。\n\nワークフローの要件：\n1. Issueに "feature" ラベルが付いたときに起動\n2. Issue本文からリクエスト内容を読み取る\n3. Claude APIを呼び出してコードを生成\n4. 新しいブランチ "feature/issue-{番号}" を作成\n5. 生成されたコードをコミット\n6. Pull Requestを作成（Issue番号を参照）\n7. ANTHROPIC_API_KEY は Secrets から読み取る\n\nワークフローのモデルは claude-sonnet-4-20250514 を使用してください。\n';
+          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが自動でコードを書いてPull Requestを作成する機能です。\n\nワークフローの要件：\n1. Issueに "feature" ラベルが付いたときに起動\n2. Issue本文からリクエスト内容を読み取る\n3. Claude APIを呼び出してコードを生成\n4. 新しいブランチ "feature/issue-{番号}" を作成\n5. 生成されたコードをコミット\n6. Pull Requestを作成（Issue番号を参照）\n7. ANTHROPIC_API_KEY は Secrets から読み取る\n\nワークフローのモデルは claude-sonnet-4-20250514 を使用してください。\n\n## 重要：Issueテンプレートを含める\n\n以下のIssueテンプレートファイルも必ず含めてください：\n\n.github/ISSUE_TEMPLATE/feature_request.yml\n.github/ISSUE_TEMPLATE/bug_report.yml\n.github/ISSUE_TEMPLATE/enhancement.yml\n\nIssueテンプレートの要件：\n\n### feature_request.yml:\n- name: 新機能のリクエスト\n- labels: ["feature"]\n- フィールド：タイトル、説明、期待する動作、追加情報（任意）\n\n### bug_report.yml:\n- name: バグ報告\n- labels: ["bug"]\n- フィールド：バグの説明、再現手順、期待する動作、実際の動作、環境情報、スクリーンショット（任意）\n\n### enhancement.yml:\n- name: 改善提案\n- labels: ["enhancement"]\n- フィールド：改善したい機能、提案内容、メリット\n\nすべてのテンプレートは日本語で作成してください。\n';
           
           console.log(JSON.stringify({
             repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
@@ -76,7 +76,7 @@ jobs:
             max_tokens: 16000,
             messages: [{
               role: "user",
-              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    "src/index.js": "内容"\n  }\n}\n\n.github/workflows/claude-feature.yml は必ず含めてください。これがIssueからPRを自動作成する機能です。'
+              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（IssueからPR自動作成）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。'
             }]
           });
           
@@ -261,6 +261,20 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
             -d '{"name":"enhancement","description":"Improvement to existing feature","color":"a2eeef"}'
+          
+          # Create "question" label
+          curl -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+            -d '{"name":"question","description":"Further information is requested","color":"d876e3"}'
+          
+          # Create "warning" label
+          curl -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+            -d '{"name":"warning","description":"Needs attention","color":"fbca04"}'
           
           echo "✅ Labels have been created in $REPO_NAME"
       
