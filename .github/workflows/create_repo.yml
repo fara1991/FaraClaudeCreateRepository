@@ -45,7 +45,7 @@ jobs:
           const license = extractField('ライセンス');
           const notes = extractField('その他の要望（任意）');
           
-          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n';
+          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが自動でコードを書いてPull Requestを作成する機能です。\n\nワークフローの要件：\n1. Issueに "feature" ラベルが付いたときに起動\n2. Issue本文からリクエスト内容を読み取る\n3. Claude APIを呼び出してコードを生成\n4. 新しいブランチ "feature/issue-{番号}" を作成\n5. 生成されたコードをコミット\n6. Pull Requestを作成（Issue番号を参照）\n7. ANTHROPIC_API_KEY は Secrets から読み取る\n\nワークフローのモデルは claude-sonnet-4-20250514 を使用してください。\n';
           
           console.log(JSON.stringify({
             repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
@@ -73,10 +73,10 @@ jobs:
           
           const requestData = JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 8000,
+            max_tokens: 16000,
             messages: [{
               role: "user",
-              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    "src/index.js": "内容"\n  }\n}'
+              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    "src/index.js": "内容"\n  }\n}\n\n.github/workflows/claude-feature.yml は必ず含めてください。これがIssueからPRを自動作成する機能です。'
             }]
           });
           
@@ -146,12 +146,15 @@ jobs:
             https://api.github.com/user/repos \
             -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false)}"
           
+          sleep 2
+          
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
       
       - name: Clone and setup repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           REPO_NAME="${{ env.REPO_NAME }}"
           
@@ -177,6 +180,60 @@ jobs:
           
           echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
       
+      - name: Setup Secrets in new repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          REPO_NAME="${{ env.REPO_NAME }}"
+          OWNER="${{ github.repository_owner }}"
+          
+          # Get repository public key
+          PUBLIC_KEY_RESPONSE=$(curl -s \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/public-key")
+          
+          PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
+          KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
+          
+          # Encrypt the secret using libsodium
+          cat > encrypt-secret.js << 'ENCRYPTSCRIPT'
+          const sodium = require('libsodium-wrappers');
+          
+          (async () => {
+            await sodium.ready;
+            
+            const publicKey = process.env.PUBLIC_KEY;
+            const secret = process.env.SECRET_VALUE;
+            
+            const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
+            const binsec = sodium.from_string(secret);
+            
+            const encBytes = sodium.crypto_box_seal(binsec, binkey);
+            const output = sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL);
+            
+            console.log(output);
+          })();
+          ENCRYPTSCRIPT
+          
+          # Install libsodium-wrappers
+          npm install libsodium-wrappers
+          
+          # Encrypt the API key
+          export PUBLIC_KEY="$PUBLIC_KEY"
+          export SECRET_VALUE="$ANTHROPIC_API_KEY"
+          ENCRYPTED_VALUE=$(node encrypt-secret.js)
+          
+          # Create the secret
+          curl -X PUT \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/ANTHROPIC_API_KEY" \
+            -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}"
+          
+          echo "✅ ANTHROPIC_API_KEY has been added to $REPO_NAME"
+      
       - name: Comment on issue
         uses: actions/github-script@v7
         with:
@@ -187,7 +244,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\nClaudeによって自動生成されました。`
+              body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\n### 🤖 AI機能が有効化されています\n\n新しいリポジトリでIssueを作成すると、Claudeが自動でコードを書いてPull Requestを作成します。\n\n**使い方：**\n1. 新しいリポジトリでIssueを作成\n2. "feature" ラベルを追加\n3. 実装してほしい機能を記述\n4. 数分後、自動でPRが作成されます！\n\nClaudeによって自動生成されました。`
             });
             
             await github.rest.issues.update({
