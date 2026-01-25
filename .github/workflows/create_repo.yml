@@ -5,9 +5,9 @@ on:
     types: [opened, labeled]
 
 jobs:
-  create_repo:
+  create-repo:
     runs-on: ubuntu-latest
-    if: contains(github.event.issue.labels.*.name, 'create_repo') && github.event.issue.user.login == github.repository_owner
+    if: contains(github.event.issue.labels.*.name, 'create_repo')
     
     steps:
       - name: Checkout repository
