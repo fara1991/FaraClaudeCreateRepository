@@ -73,7 +73,7 @@ jobs:
           
           const requestData = JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 16000,
+            max_tokens:30000,
             messages: [{
               role: "user",
               content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（IssueからPR自動作成）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。'
