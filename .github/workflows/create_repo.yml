@@ -1,299 +1,327 @@
 name: Create Repository from Issue
 
 on:
-  issues:
-    types: [opened]
+issues:
+types: [opened]
 
 permissions:
-  contents: read
-  issues: write
+contents: read
+issues: write
 
 jobs:
-  create-repo:
-    runs-on: ubuntu-latest
-    if: contains(github.event.issue.labels.*.name, 'create_repo')
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+create-repo:
+runs-on: ubuntu-latest
+if: contains(github.event.issue.labels.*.name, ‘create_repo’)
+
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+  
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '20'
+  
+  - name: Parse issue body
+    id: parse-issue
+    env:
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    run: |
+      cat > parse-issue.js << 'ENDOFSCRIPT'
+      const issueBody = process.env.ISSUE_BODY;
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      const extractField = (label) => {
+        const regex = new RegExp('### ' + label + '\\s*([\\s\\S]*?)(?=\\n###|$)', 'i');
+        const match = issueBody.match(regex);
+        return match ? match[1].trim() : '';
+      };
       
-      - name: Parse issue body
-        id: parse-issue
-        env:
-          ISSUE_BODY: ${{ github.event.issue.body }}
-        run: |
-          cat > parse-issue.js << 'ENDOFSCRIPT'
-          const issueBody = process.env.ISSUE_BODY;
-          
-          const extractField = (label) => {
-            const regex = new RegExp('### ' + label + '\\s*([\\s\\S]*?)(?=\\n###|$)', 'i');
-            const match = issueBody.match(regex);
-            return match ? match[1].trim() : '';
-          };
-          
-          const repoName = extractField('リポジトリ名');
-          const projectType = extractField('プロジェクトタイプ');
-          const techStack = extractField('技術スタック');
-          const description = extractField('プロジェクトの説明');
-          const features = extractField('必要な機能（任意）');
-          const visibility = extractField('リポジトリの公開設定');
-          const license = extractField('ライセンス');
-          const notes = extractField('その他の要望（任意）');
-          
-          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが自動でコードを書いてPull Requestを作成する機能です。\n\nワークフローの要件：\n1. Issueに "feature" ラベルが付いたときに起動\n2. Issue本文からリクエスト内容を読み取る\n3. Claude APIを呼び出してコードを生成\n4. 新しいブランチ "feature/issue-{番号}" を作成\n5. 生成されたコードをコミット\n6. Pull Requestを作成（Issue番号を参照）\n7. ANTHROPIC_API_KEY は Secrets から読み取る\n\nワークフローのモデルは claude-sonnet-4-20250514 を使用してください。\n\n## 重要：Issueテンプレートを含める\n\n以下のIssueテンプレートファイルも必ず含めてください：\n\n.github/ISSUE_TEMPLATE/feature_request.yml\n.github/ISSUE_TEMPLATE/bug_report.yml\n.github/ISSUE_TEMPLATE/enhancement.yml\n\nIssueテンプレートの要件：\n\n### feature_request.yml:\n- name: 新機能のリクエスト\n- labels: ["feature"]\n- フィールド：タイトル、説明、期待する動作、追加情報（任意）\n\n### bug_report.yml:\n- name: バグ報告\n- labels: ["bug"]\n- フィールド：バグの説明、再現手順、期待する動作、実際の動作、環境情報、スクリーンショット（任意）\n\n### enhancement.yml:\n- name: 改善提案\n- labels: ["enhancement"]\n- フィールド：改善したい機能、提案内容、メリット\n\nすべてのテンプレートは日本語で作成してください。\n';
-          
-          console.log(JSON.stringify({
-            repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
-            visibility: visibility.includes('プライベート') ? 'private' : 'public',
-            prompt: promptText
-          }));
-          ENDOFSCRIPT
-          
-          PARSED=$(node parse-issue.js)
-          echo "data<<EOF" >> $GITHUB_OUTPUT
-          echo "$PARSED" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+      const repoName = extractField('リポジトリ名');
+      const projectType = extractField('プロジェクトタイプ');
+      const techStack = extractField('技術スタック');
+      const description = extractField('プロジェクトの説明');
+      const features = extractField('必要な機能（任意）');
+      const visibility = extractField('リポジトリの公開設定');
+      const license = extractField('ライセンス');
+      const notes = extractField('その他の要望（任意）');
       
-      - name: Call Claude API
-        id: claude
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
-          
-          cat > call-claude.js << 'ENDOFSCRIPT'
-          const https = require('https');
-          
-          const prompt = process.env.PROMPT;
-          
-          const requestData = JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens:30000,
-            messages: [{
-              role: "user",
-              content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（IssueからPR自動作成）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。'
-            }]
-          });
-          
-          const options = {
-            hostname: 'api.anthropic.com',
-            port: 443,
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(requestData),
-              'x-api-key': process.env.ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
+      const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが自動でコードを書いてPull Requestを作成する機能です。\n\nワークフローの要件：\n1. Issueに "feature" ラベルが付いている状態で作成されたとき（opened）に起動\n2. トリガー設定：on.issues.types は ["opened"] のみ（labeledは含めない）\n3. 条件：contains(github.event.issue.labels.*.name, \'feature\')\n4. Issue本文からリクエスト内容を読み取る\n5. Claude APIを呼び出してコードを生成\n6. 新しいブランチ "feature/issue-{番号}" を作成\n7. 生成されたコードをコミット\n8. Pull Requestを作成（Issue番号を参照）\n9. ANTHROPIC_API_KEY は Secrets から読み取る\n10. permissions: contents: write, issues: write, pull-requests: write を設定\n\nワークフローのモデルは claude-sonnet-4-20250514 を使用してください。\n\n## 重要：Issueテンプレートを含める\n\n以下のIssueテンプレートファイルも必ず含めてください：\n\n.github/ISSUE_TEMPLATE/feature_request.yml\n.github/ISSUE_TEMPLATE/bug_report.yml\n.github/ISSUE_TEMPLATE/enhancement.yml\n\nIssueテンプレートの要件：\n\n### feature_request.yml:\n- name: 新機能のリクエスト\n- labels: ["feature"]\n- フィールド：タイトル、説明、期待する動作、追加情報（任意）\n\n### bug_report.yml:\n- name: バグ報告\n- labels: ["bug"]\n- フィールド：バグの説明、再現手順、期待する動作、実際の動作、環境情報、スクリーンショット（任意）\n\n### enhancement.yml:\n- name: 改善提案\n- labels: ["enhancement"]\n- フィールド：改善したい機能、提案内容、メリット\n\nすべてのテンプレートは日本語で作成してください。\n';
+      
+      console.log(JSON.stringify({
+        repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
+        visibility: visibility.includes('プライベート') ? 'private' : 'public',
+        prompt: promptText
+      }));
+      ENDOFSCRIPT
+      
+      PARSED=$(node parse-issue.js)
+      echo "data<<EOF" >> $GITHUB_OUTPUT
+      echo "$PARSED" >> $GITHUB_OUTPUT
+      echo "EOF" >> $GITHUB_OUTPUT
+  
+  - name: Call Claude API
+    id: claude
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    run: |
+      PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
+      
+      cat > call-claude.js << 'ENDOFSCRIPT'
+      const https = require('https');
+      
+      const prompt = process.env.PROMPT;
+      
+      const requestData = JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 32000,
+        messages: [{
+          role: "user",
+          content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "ワークフローの内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（IssueからPR自動作成）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。'
+        }]
+      });
+      
+      const options = {
+        hostname: 'api.anthropic.com',
+        port: 443,
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(requestData),
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      };
+      
+      const req = https.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          try {
+            const response = JSON.parse(body);
+            
+            if (response.error) {
+              console.error('API Error:', response.error);
+              process.exit(1);
             }
-          };
-          
-          const req = https.request(options, (res) => {
-            let body = '';
-            res.on('data', (chunk) => body += chunk);
-            res.on('end', () => {
+            
+            if (!response.content || !response.content[0]) {
+              console.error('Invalid response structure');
+              process.exit(1);
+            }
+            
+            const content = response.content[0].text;
+            
+            // JSONブロックを抽出
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
               try {
-                const response = JSON.parse(body);
-                const content = response.content[0].text;
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  const parsed = JSON.parse(jsonMatch[0]);
-                  console.log(JSON.stringify(parsed, null, 2));
+                const parsed = JSON.parse(jsonMatch[0]);
+                console.log(JSON.stringify(parsed, null, 2));
+              } catch (parseError) {
+                console.error('JSON Parse Error:', parseError.message);
+                console.error('Position:', parseError.message.match(/\d+/)?.[0]);
+                // JSONが大きすぎる場合は一部だけ表示
+                const jsonText = jsonMatch[0];
+                if (jsonText.length > 5000) {
+                  console.error('JSON too large, showing first/last 1000 chars');
+                  console.error('First 1000:', jsonText.substring(0, 1000));
+                  console.error('Last 1000:', jsonText.substring(jsonText.length - 1000));
                 } else {
-                  console.error('JSON not found');
-                  process.exit(1);
+                  console.error('Full JSON:', jsonText);
                 }
-              } catch (e) {
-                console.error('Error:', e.message);
                 process.exit(1);
               }
-            });
-          });
-          
-          req.on('error', (e) => {
-            console.error('Request error:', e.message);
+            } else {
+              console.error('JSON not found in response');
+              process.exit(1);
+            }
+          } catch (e) {
+            console.error('Error:', e.message);
             process.exit(1);
-          });
-          
-          req.write(requestData);
-          req.end();
-          ENDOFSCRIPT
-          
-          export PROMPT="$PROMPT"
-          CLAUDE_OUTPUT=$(node call-claude.js)
-          
-          echo "output<<EOF" >> $GITHUB_OUTPUT
-          echo "$CLAUDE_OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          }
+        });
+      });
       
-      - name: Create repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
-          VISIBILITY: ${{ fromJSON(steps.parse-issue.outputs.data).visibility }}
-        run: |
-          REPO_NAME=$(echo "$CLAUDE_OUTPUT" | jq -r '.repo_name')
-          REPO_DESC=$(echo "$CLAUDE_OUTPUT" | jq -r '.description')
-          
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/user/repos \
-            -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false)}"
-          
-          sleep 2
-          
-          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+      req.on('error', (e) => {
+        console.error('Request error:', e.message);
+        process.exit(1);
+      });
       
-      - name: Clone and setup repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          REPO_NAME="${{ env.REPO_NAME }}"
-          
-          git config --global user.name "Claude Bot"
-          git config --global user.email "claude-bot@github-actions"
-          
-          mkdir -p /tmp/new-repo
-          cd /tmp/new-repo
-          git init
-          git branch -M main
-          
-          echo "$CLAUDE_OUTPUT" | jq -r '.files | to_entries[] | @json' | while read -r entry; do
-            filepath=$(echo "$entry" | jq -r '.key')
-            content=$(echo "$entry" | jq -r '.value')
-            mkdir -p "$(dirname "$filepath")"
-            echo "$content" > "$filepath"
-          done
-          
-          git add .
-          git commit -m "Initial commit from Issue #${{ github.event.issue.number }}"
-          git remote add origin "https://$GITHUB_TOKEN@github.com/${{ github.repository_owner }}/$REPO_NAME.git"
-          git push -u origin main
-          
-          echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
+      req.write(requestData);
+      req.end();
+      ENDOFSCRIPT
       
-      - name: Setup Secrets in new repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          REPO_NAME="${{ env.REPO_NAME }}"
-          OWNER="${{ github.repository_owner }}"
-          
-          # Get repository public key
-          PUBLIC_KEY_RESPONSE=$(curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/public-key")
-          
-          PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
-          KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
-          
-          # Encrypt the secret using libsodium
-          cat > encrypt-secret.js << 'ENCRYPTSCRIPT'
-          const sodium = require('libsodium-wrappers');
-          
-          (async () => {
-            await sodium.ready;
-            
-            const publicKey = process.env.PUBLIC_KEY;
-            const secret = process.env.SECRET_VALUE;
-            
-            const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
-            const binsec = sodium.from_string(secret);
-            
-            const encBytes = sodium.crypto_box_seal(binsec, binkey);
-            const output = sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL);
-            
-            console.log(output);
-          })();
-          ENCRYPTSCRIPT
-          
-          # Install libsodium-wrappers
-          npm install libsodium-wrappers
-          
-          # Encrypt the API key
-          export PUBLIC_KEY="$PUBLIC_KEY"
-          export SECRET_VALUE="$ANTHROPIC_API_KEY"
-          ENCRYPTED_VALUE=$(node encrypt-secret.js)
-          
-          # Create the secret
-          curl -X PUT \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/ANTHROPIC_API_KEY" \
-            -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}"
-          
-          echo "✅ ANTHROPIC_API_KEY has been added to $REPO_NAME"
+      export PROMPT="$PROMPT"
+      CLAUDE_OUTPUT=$(node call-claude.js)
       
-      - name: Create labels in new repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          REPO_NAME="${{ env.REPO_NAME }}"
-          OWNER="${{ github.repository_owner }}"
-          
-          # Create "feature" label
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
-            -d '{"name":"feature","description":"New feature or request","color":"0e8a16"}'
-          
-          # Create "bug" label
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
-            -d '{"name":"bug","description":"Something is not working","color":"d73a4a"}'
-          
-          # Create "enhancement" label
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
-            -d '{"name":"enhancement","description":"Improvement to existing feature","color":"a2eeef"}'
-          
-          # Create "question" label
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
-            -d '{"name":"question","description":"Further information is requested","color":"d876e3"}'
-          
-          # Create "warning" label
-          curl -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
-            -d '{"name":"warning","description":"Needs attention","color":"fbca04"}'
-          
-          echo "✅ Labels have been created in $REPO_NAME"
+      echo "output<<EOF" >> $GITHUB_OUTPUT
+      echo "$CLAUDE_OUTPUT" >> $GITHUB_OUTPUT
+      echo "EOF" >> $GITHUB_OUTPUT
+  
+  - name: Create repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
+      VISIBILITY: ${{ fromJSON(steps.parse-issue.outputs.data).visibility }}
+    run: |
+      REPO_NAME=$(echo "$CLAUDE_OUTPUT" | jq -r '.repo_name')
+      REPO_DESC=$(echo "$CLAUDE_OUTPUT" | jq -r '.description')
       
-      - name: Comment on issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const repoUrl = process.env.REPO_URL;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\n### 🤖 AI機能が有効化されています\n\n新しいリポジトリでIssueを作成すると、Claudeが自動でコードを書いてPull Requestを作成します。\n\n**使い方：**\n1. 新しいリポジトリでIssueを作成\n2. "feature" ラベルを追加\n3. 実装してほしい機能を記述\n4. 数分後、自動でPRが作成されます！\n\nClaudeによって自動生成されました。`
-            });
-            
-            await github.rest.issues.update({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'closed'
-            });
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        https://api.github.com/user/repos \
+        -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false)}"
+      
+      sleep 2
+      
+      echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+  
+  - name: Clone and setup repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      CLAUDE_OUTPUT: ${{ steps.claude.outputs.output }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    run: |
+      REPO_NAME="${{ env.REPO_NAME }}"
+      
+      git config --global user.name "Claude Bot"
+      git config --global user.email "claude-bot@github-actions"
+      
+      mkdir -p /tmp/new-repo
+      cd /tmp/new-repo
+      git init
+      git branch -M main
+      
+      echo "$CLAUDE_OUTPUT" | jq -r '.files | to_entries[] | @json' | while read -r entry; do
+        filepath=$(echo "$entry" | jq -r '.key')
+        content=$(echo "$entry" | jq -r '.value')
+        mkdir -p "$(dirname "$filepath")"
+        echo "$content" > "$filepath"
+      done
+      
+      git add .
+      git commit -m "Initial commit from Issue #${{ github.event.issue.number }}"
+      git remote add origin "https://$GITHUB_TOKEN@github.com/${{ github.repository_owner }}/$REPO_NAME.git"
+      git push -u origin main
+      
+      echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
+  
+  - name: Setup Secrets in new repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    run: |
+      REPO_NAME="${{ env.REPO_NAME }}"
+      OWNER="${{ github.repository_owner }}"
+      
+      # Get repository public key
+      PUBLIC_KEY_RESPONSE=$(curl -s \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/public-key")
+      
+      PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
+      KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
+      
+      # Encrypt the secret using libsodium
+      cat > encrypt-secret.js << 'ENCRYPTSCRIPT'
+      const sodium = require('libsodium-wrappers');
+      
+      (async () => {
+        await sodium.ready;
+        
+        const publicKey = process.env.PUBLIC_KEY;
+        const secret = process.env.SECRET_VALUE;
+        
+        const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
+        const binsec = sodium.from_string(secret);
+        
+        const encBytes = sodium.crypto_box_seal(binsec, binkey);
+        const output = sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL);
+        
+        console.log(output);
+      })();
+      ENCRYPTSCRIPT
+      
+      # Install libsodium-wrappers
+      npm install libsodium-wrappers
+      
+      # Encrypt the API key
+      export PUBLIC_KEY="$PUBLIC_KEY"
+      export SECRET_VALUE="$ANTHROPIC_API_KEY"
+      ENCRYPTED_VALUE=$(node encrypt-secret.js)
+      
+      # Create the secret
+      curl -X PUT \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/ANTHROPIC_API_KEY" \
+        -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}"
+      
+      echo "✅ ANTHROPIC_API_KEY has been added to $REPO_NAME"
+  
+  - name: Create labels in new repository
+    env:
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+    run: |
+      REPO_NAME="${{ env.REPO_NAME }}"
+      OWNER="${{ github.repository_owner }}"
+      
+      # Create "feature" label
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+        -d '{"name":"feature","description":"New feature or request","color":"0e8a16"}'
+      
+      # Create "bug" label
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+        -d '{"name":"bug","description":"Something is not working","color":"d73a4a"}'
+      
+      # Create "enhancement" label
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+        -d '{"name":"enhancement","description":"Improvement to existing feature","color":"a2eeef"}'
+      
+      # Create "question" label
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+        -d '{"name":"question","description":"Further information is requested","color":"d876e3"}'
+      
+      # Create "warning" label
+      curl -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
+        -d '{"name":"warning","description":"Needs attention","color":"fbca04"}'
+      
+      echo "✅ Labels have been created in $REPO_NAME"
+  
+  - name: Comment on issue
+    uses: actions/github-script@v7
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      script: |
+        const repoUrl = process.env.REPO_URL;
+        await github.rest.issues.createComment({
+          issue_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\n### 🤖 AI機能が有効化されています\n\n新しいリポジトリでIssueを作成すると、Claudeが自動でコードを書いてPull Requestを作成します。\n\n**使い方：**\n1. 新しいリポジトリでIssueを作成\n2. "feature" ラベルを追加\n3. 実装してほしい機能を記述\n4. 数分後、自動でPRが作成されます！\n\nClaudeによって自動生成されました。`
+        });
+        
+        await github.rest.issues.update({
+          issue_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          state: 'closed'
+        });
