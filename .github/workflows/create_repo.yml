@@ -157,15 +157,27 @@ jobs:
 
                 const content = response.content[0].text;
 
+                const repairJson = (str) => {
+                  return str
+                    .replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u')
+                    .replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+                };
+
                 const jsonMatch = content.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
+                  let parsed;
                   try {
-                    const parsed = JSON.parse(jsonMatch[0]);
-                    console.log(JSON.stringify(parsed, null, 2));
+                    parsed = JSON.parse(jsonMatch[0]);
                   } catch (parseError) {
-                    console.error('JSON Parse Error:', parseError.message);
-                    process.exit(1);
+                    try {
+                      parsed = JSON.parse(repairJson(jsonMatch[0]));
+                      console.error('Note: JSON was auto-repaired');
+                    } catch (repairError) {
+                      console.error('JSON Parse Error:', parseError.message);
+                      process.exit(1);
+                    }
                   }
+                  console.log(JSON.stringify(parsed, null, 2));
                 } else {
                   console.error('JSON not found in response');
                   process.exit(1);
