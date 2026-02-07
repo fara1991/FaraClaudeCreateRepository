@@ -26,9 +26,15 @@ body:
       description: 作成したいプロジェクトの種類
       options:
         - Webアプリケーション
+        - API/バックエンド
         - モバイルアプリ
+        - デスクトップアプリ
+        - CLIツール
         - ライブラリ/パッケージ
+        - Chrome拡張機能
+        - ダッシュボード/管理画面
         - ランディングページ
+        - ポートフォリオサイト
         - ブログ
         - その他
     validations:
@@ -43,10 +49,23 @@ body:
         - React + TypeScript
         - Next.js
         - Vue.js
+        - Nuxt.js
+        - Angular
         - Svelte
-        - Vanilla JavaScript
-        - Python Flask
+        - Astro
+        - Vanilla JavaScript/TypeScript
         - Node.js Express
+        - Python FastAPI
+        - Python Flask
+        - Python Django
+        - Ruby on Rails
+        - Go (Gin/Echo)
+        - Java Spring Boot
+        - C# / .NET (Blazor)
+        - PHP Laravel
+        - React Native
+        - Flutter
+        - Electron
         - その他（詳細に記載）
     validations:
       required: true
