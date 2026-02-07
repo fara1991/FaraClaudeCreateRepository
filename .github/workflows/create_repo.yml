@@ -111,19 +111,17 @@ jobs:
           PARSE_DATA: ${{ steps.parse-issue.outputs.data }}
         run: |
           cat > call-claude.js << 'ENDOFSCRIPT'
-          const https = require('https');
-
           const parseData = JSON.parse(process.env.PARSE_DATA);
           const prompt = parseData.prompt;
 
-          const requestData = JSON.stringify({
+          const requestBody = {
             model: "claude-sonnet-4-20250514",
             max_tokens: 32000,
             messages: [{
               role: "user",
               content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "上記の完全なワークフロー内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（上記の Enhanced 版ワークフロー）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。ワークフローは上記の仕様通りに作成してください。'
             }]
-          });
+          };
 
           const repairJson = (str) => {
             return str
@@ -134,38 +132,26 @@ jobs:
           const MAX_RETRIES = 3;
           const TIMEOUT_MS = 300000;
 
-          function callApi(attempt) {
-            return new Promise((resolve, reject) => {
-              const options = {
-                hostname: 'api.anthropic.com',
-                port: 443,
-                path: '/v1/messages',
+          async function callApi(attempt) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+            try {
+              const res = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(requestData),
                   'x-api-key': process.env.ANTHROPIC_API_KEY,
                   'anthropic-version': '2023-06-01'
                 },
-                timeout: TIMEOUT_MS
-              };
-
-              const req = https.request(options, (res) => {
-                let body = '';
-                res.on('data', (chunk) => body += chunk);
-                res.on('end', () => resolve(body));
+                body: JSON.stringify(requestBody),
+                signal: controller.signal
               });
-
-              req.on('timeout', () => {
-                req.destroy();
-                reject(new Error('Request timeout (' + TIMEOUT_MS / 1000 + 's)'));
-              });
-
-              req.on('error', (e) => reject(e));
-
-              req.write(requestData);
-              req.end();
-            });
+              const body = await res.text();
+              return body;
+            } finally {
+              clearTimeout(timeoutId);
+            }
           }
 
           async function main() {
@@ -178,6 +164,7 @@ jobs:
                   await new Promise(r => setTimeout(r, delay));
                 }
 
+                console.error('Attempt ' + attempt + '/' + MAX_RETRIES + '...');
                 const body = await callApi(attempt);
                 const response = JSON.parse(body);
 
