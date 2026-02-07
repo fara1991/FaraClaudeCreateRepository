@@ -8,34 +8,39 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: create-repo-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 jobs:
   create-repo:
     runs-on: ubuntu-latest
     if: contains(github.event.issue.labels.*.name, 'create_repo')
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+
       - name: Parse issue body
         id: parse-issue
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           cat > parse-issue.js << 'ENDOFSCRIPT'
+          const fs = require('fs');
           const issueBody = process.env.ISSUE_BODY;
-          
+
           const extractField = (label) => {
             const regex = new RegExp('### ' + label + '\\s*([\\s\\S]*?)(?=\\n###|$)', 'i');
             const match = issueBody.match(regex);
             return match ? match[1].trim() : '';
           };
-          
+
           const repoName = extractField('リポジトリ名');
           const projectType = extractField('プロジェクトタイプ');
           const techStack = extractField('技術スタック');
@@ -44,33 +49,73 @@ jobs:
           const visibility = extractField('リポジトリの公開設定');
           const license = extractField('ライセンス');
           const notes = extractField('その他の要望（任意）');
-          
-          const promptText = '\n# プロジェクト作成リクエスト\n\n## 基本情報\n- リポジトリ名: ' + repoName + '\n- プロジェクトタイプ: ' + projectType + '\n- 技術スタック: ' + techStack + '\n- ライセンス: ' + license + '\n\n## プロジェクトの説明\n' + description + '\n\n' + (features ? '## 必要な機能\n' + features + '\n\n' : '') + (notes ? '## その他の要望\n' + notes + '\n\n' : '') + '完全に動作するプロジェクトを作成してください。\nREADME.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n## 重要：GitHub Actions ワークフローを含める\n\n以下のファイルを必ず含めてください：\n\n.github/workflows/claude-feature.yml\n\nこのワークフローは、リポジトリでIssueが作成されたときに、Claudeが既存コードを読み取り、自動でコード変更・追加・削除を行ってPull Requestを作成する高度な機能です。\n\nワークフローの完全な仕様：\n\n```yaml\nname: Claude Feature Generator (Enhanced)\n\non:\n  issues:\n    types: [opened]\n\npermissions:\n  contents: write\n  issues: write\n  pull-requests: write\n\njobs:\n  generate-feature:\n    if: |\n      contains(github.event.issue.labels.*.name, \'feature\') ||\n      contains(github.event.issue.labels.*.name, \'bug\') ||\n      contains(github.event.issue.labels.*.name, \'enhancement\') ||\n      contains(github.event.issue.labels.*.name, \'refactor\')\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      issues: write\n      pull-requests: write\n    \n    steps:\n      - name: Checkout repository\n        uses: actions/checkout@v4\n      \n      - name: Gather repository context\n        run: |\n          echo "=== Repository Structure ===" > repo_context.txt\n          tree -L 3 -I \'bin|obj|node_modules|.git\' >> repo_context.txt 2>/dev/null || find . -maxdepth 3 -type f -not -path \'*/\\.*\' -not -path \'*/bin/*\' -not -path \'*/obj/*\' | head -100 >> repo_context.txt\n          echo -e "\\n=== Project Files ===" >> repo_context.txt\n          find . -name "*.csproj" -o -name "package.json" -o -name "*.sln" | head -10 | while read f; do echo "File: $f" >> repo_context.txt; cat "$f" >> repo_context.txt 2>/dev/null; done\n          echo -e "\\n=== Source Files ===" >> repo_context.txt\n          find . \\( -name "*.cs" -o -name "*.razor" -o -name "*.js" -o -name "*.py" -o -name "*.java" \\) | grep -v "/bin/" | grep -v "/obj/" | grep -v "/node_modules/" | head -30 | while read f; do echo -e "\\n### File: $f" >> repo_context.txt; cat "$f" >> repo_context.txt; echo -e "\\n---\\n" >> repo_context.txt; done\n      \n      - name: Generate feature code with Claude\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n          ISSUE_TITLE: ${{ github.event.issue.title }}\n          ISSUE_BODY: ${{ github.event.issue.body }}\n          ISSUE_NUMBER: ${{ github.event.issue.number }}\n        run: |\n          git config --global user.name \'github-actions[bot]\'\n          git config --global user.email \'github-actions[bot]@users.noreply.github.com\'\n          git checkout -b feature/issue-${{ github.event.issue.number }}\n          \n          REPO_CONTEXT=$(cat repo_context.txt | head -c 100000)\n          ESCAPED_TITLE=$(echo "$ISSUE_TITLE" | jq -Rs .)\n          ESCAPED_BODY=$(echo "$ISSUE_BODY" | jq -Rs .)\n          ESCAPED_CONTEXT=$(echo "$REPO_CONTEXT" | jq -Rs .)\n          \n          PAYLOAD=$(jq -n --argjson title "$ESCAPED_TITLE" --argjson body "$ESCAPED_BODY" --argjson context "$ESCAPED_CONTEXT" \'{model: "claude-sonnet-4-20250514", max_tokens: 16000, messages: [{role: "user", content: "あなたはソフトウェア開発アシスタントです。既存コードを理解した上で、Issue の要望を実装してください。\\n\\n# 現在のリポジトリ:\\n\\n\\($context)\\n\\n# Issue:\\n\\nタイトル: \\($title)\\n\\n詳細:\\n\\($body)\\n\\n# 指示:\\n\\n1. 既存ファイル編集時は完全な内容を出力\\n2. 新規ファイルは完全なコードを提供\\n3. 削除ファイルは明示\\n4. .github/workflows/ 配下は作成・変更しない\\n5. 各ファイルの変更理由を説明\\n\\n# 出力形式:\\n\\n## ファイル: [パス]\\n変更タイプ: [CREATE/UPDATE/DELETE]\\n説明: [目的]\\n\\n```[言語]\\n[内容]\\n```"}]}\')\n          \n          response=$(curl -s -X POST "https://api.anthropic.com/v1/messages" -H "Content-Type: application/json" -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" -d "$PAYLOAD")\n          echo "$response" | jq \'.\' > claude_response.json\n          CLAUDE_TEXT=$(echo "$response" | jq -r \'.content[0].text // empty\')\n          \n          if [ -z "$CLAUDE_TEXT" ]; then\n            echo "Error: No response from Claude API"\n            cat claude_response.json\n            exit 1\n          fi\n          \n          echo "$CLAUDE_TEXT" > claude_output.txt\n          \n          echo "Parsing Claude response..."\n          grep -n "^## ファイル:" claude_output.txt | while IFS=: read -r line_num filepath_line; do\n            filepath=$(echo "$filepath_line" | sed \'s/^## ファイル: *//\' | sed \'s/^[[:space:]]*//\' | sed \'s/[[:space:]]*$//\')\n            \n            if [[ "$filepath" == .github/workflows/* ]]; then\n              echo "Skipping: $filepath (workflow restriction)"\n              echo "- \\`$filepath\\`: Skipped (workflow files)" >> skipped_files.txt\n              continue\n            fi\n            \n            change_type=$(sed -n "$((line_num+1))p" claude_output.txt | grep "変更タイプ:" | sed \'s/変更タイプ: *//\' | sed \'s/^[[:space:]]*//\' | sed \'s/[[:space:]]*$//\' | tr \'[:lower:]\' \'[:upper:]\')\n            description=$(sed -n "$((line_num+2))p" claude_output.txt | grep "説明:" | sed \'s/説明: *//\')\n            [ -z "$change_type" ] && change_type="UPDATE"\n            [ -z "$description" ] && description="No description"\n            \n            code_start=$(tail -n +$((line_num+1)) claude_output.txt | grep -n \'```\' | head -1 | cut -d: -f1)\n            if [ -n "$code_start" ]; then\n              code_start=$((line_num + code_start))\n              code_end=$(tail -n +$((code_start+1)) claude_output.txt | grep -n \'```\' | head -1 | cut -d: -f1)\n              \n              if [ -n "$code_end" ]; then\n                code_end=$((code_start + code_end))\n                echo "Processing: $change_type - $filepath"\n                \n                if [ "$change_type" = "DELETE" ]; then\n                  [ -f "$filepath" ] && rm -f "$filepath" && echo "- \\`$filepath\\`: $description" >> deleted_files.txt\n                else\n                  sed -n "$((code_start+1)),$((code_end-1))p" claude_output.txt > "$filepath.tmp"\n                  mkdir -p "$(dirname "$filepath")"\n                  mv "$filepath.tmp" "$filepath"\n                  [ -f "$filepath" ] && echo "- \\`$filepath\\`: $description" >> $( [ "$change_type" = "CREATE" ] && echo "created_files.txt" || echo "updated_files.txt" )\n                fi\n              fi\n            fi\n          done\n          \n          echo "# Implementation Summary" > IMPLEMENTATION_SUMMARY.md\n          for file in created_files.txt updated_files.txt deleted_files.txt skipped_files.txt; do\n            [ -f "$file" ] && cat "$file" >> IMPLEMENTATION_SUMMARY.md && echo "" >> IMPLEMENTATION_SUMMARY.md && rm "$file"\n          done\n          \n          git add .\n          [ -z "$(git diff --staged)" ] && echo "No changes" && exit 1\n          git commit -m "feat: implement $ISSUE_TITLE (issue #${{ github.event.issue.number }})"\n          git push origin feature/issue-${{ github.event.issue.number }}\n      \n      - name: Create Pull Request\n        run: |\n          ISSUE_NUMBER=${{ github.event.issue.number }}\n          ISSUE_TITLE="${{ github.event.issue.title }}"\n          if [[ "${{ contains(github.event.issue.labels.*.name, \'feature\') }}" == "true" ]]; then\n            BRANCH="feature/issue-${ISSUE_NUMBER}"; PREFIX="feat"\n          elif [[ "${{ contains(github.event.issue.labels.*.name, \'bug\') }}" == "true" ]]; then\n            BRANCH="fix/issue-${ISSUE_NUMBER}"; PREFIX="fix"\n          elif [[ "${{ contains(github.event.issue.labels.*.name, \'refactor\') }}" == "true" ]]; then\n            BRANCH="feature/issue-${ISSUE_NUMBER}"; PREFIX="refactor"\n          else\n            BRANCH="enhance/issue-${ISSUE_NUMBER}"; PREFIX="enhance"\n          fi\n          PR_PAYLOAD=$(jq -n --arg title "${PREFIX}: ${ISSUE_TITLE} (fixes #${ISSUE_NUMBER})" --arg issue_num "${ISSUE_NUMBER}" --arg head "${BRANCH}" --arg base "master" \'{title: $title, body: ("## 📋 概要\\n\\nIssue #" + $issue_num + " の実装\\n\\n## 🤖 自動生成\\n\\nClaude AI 生成\\n\\n## 📝 変更内容\\n\\nIMPLEMENTATION_SUMMARY.md 参照\\n\\nCloses #" + $issue_num), head: $head, base: $base}\')\n          curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/${{ github.repository }}/pulls" -d "$PR_PAYLOAD"\n```\n\n必ずこのワークフローファイルを .github/workflows/claude-feature.yml として含めてください。\n\n## 重要：Issueテンプレートを含める\n\n以下のIssueテンプレートファイルも必ず含めてください：\n\n.github/ISSUE_TEMPLATE/feature_request.yml\n.github/ISSUE_TEMPLATE/bug_report.yml\n.github/ISSUE_TEMPLATE/enhancement.yml\n\nIssueテンプレートの要件：\n\n### feature_request.yml:\n- name: 新機能のリクエスト\n- labels: ["feature"]\n- フィールド：説明、期待する動作、追加情報（任意）\n- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\n### bug_report.yml:\n- name: バグ報告\n- labels: ["bug"]\n- フィールド：バグの説明、再現手順、期待する動作、実際の動作、環境情報、スクリーンショット（任意）\n- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\n### enhancement.yml:\n- name: 改善提案\n- labels: ["enhancement"]\n- フィールド：改善したい機能、提案内容、メリット\n- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\nすべてのテンプレートは日本語で作成してください。タイトル入力欄は GitHub のデフォルト（Add a title）を使用するため、テンプレート内には含めないでください。\n';
-          
+
+          const workflowTemplate = fs.readFileSync('templates/claude-feature-workflow.yml', 'utf8');
+
+          const promptText = '\n# プロジェクト作成リクエスト\n\n' +
+            '## 基本情報\n' +
+            '- リポジトリ名: ' + repoName + '\n' +
+            '- プロジェクトタイプ: ' + projectType + '\n' +
+            '- 技術スタック: ' + techStack + '\n' +
+            '- ライセンス: ' + license + '\n\n' +
+            '## プロジェクトの説明\n' + description + '\n\n' +
+            (features ? '## 必要な機能\n' + features + '\n\n' : '') +
+            (notes ? '## その他の要望\n' + notes + '\n\n' : '') +
+            '完全に動作するプロジェクトを作成してください。\n' +
+            'README.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n' +
+            '## 重要：GitHub Actions ワークフローを含める\n\n' +
+            '以下のファイルを必ず含めてください：\n\n' +
+            '.github/workflows/claude-feature.yml\n\n' +
+            'このワークフローは、リポジトリでIssueが作成されたときに、Claudeが既存コードを読み取り、自動でコード変更・追加・削除を行ってPull Requestを作成する高度な機能です。\n\n' +
+            'ワークフローの完全な仕様：\n\n```yaml\n' + workflowTemplate + '\n```\n\n' +
+            '必ずこのワークフローファイルを .github/workflows/claude-feature.yml として含めてください。\n\n' +
+            '## 重要：Issueテンプレートを含める\n\n' +
+            '以下のIssueテンプレートファイルも必ず含めてください：\n\n' +
+            '.github/ISSUE_TEMPLATE/feature_request.yml\n' +
+            '.github/ISSUE_TEMPLATE/bug_report.yml\n' +
+            '.github/ISSUE_TEMPLATE/enhancement.yml\n\n' +
+            'Issueテンプレートの要件：\n\n' +
+            '### feature_request.yml:\n' +
+            '- name: 新機能のリクエスト\n' +
+            '- labels: ["feature"]\n' +
+            '- フィールド：説明、期待する動作、追加情報（任意）\n' +
+            '- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\n' +
+            '### bug_report.yml:\n' +
+            '- name: バグ報告\n' +
+            '- labels: ["bug"]\n' +
+            '- フィールド：バグの説明、再現手順、期待する動作、実際の動作、環境情報、スクリーンショット（任意）\n' +
+            '- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\n' +
+            '### enhancement.yml:\n' +
+            '- name: 改善提案\n' +
+            '- labels: ["enhancement"]\n' +
+            '- フィールド：改善したい機能、提案内容、メリット\n' +
+            '- 注意：タイトルフィールドは不要（GitHub の Add a title と重複するため）\n\n' +
+            'すべてのテンプレートは日本語で作成してください。タイトル入力欄は GitHub のデフォルト（Add a title）を使用するため、テンプレート内には含めないでください。\n';
+
           console.log(JSON.stringify({
             repo_name: repoName.toLowerCase().replace(/\s+/g, '-'),
             visibility: visibility.includes('プライベート') ? 'private' : 'public',
             prompt: promptText
           }));
           ENDOFSCRIPT
-          
+
           PARSED=$(node parse-issue.js)
           echo "data<<EOF" >> $GITHUB_OUTPUT
           echo "$PARSED" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-      
+
       - name: Call Claude API
         id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PARSE_DATA: ${{ steps.parse-issue.outputs.data }}
         run: |
-          PROMPT=$(echo '${{ steps.parse-issue.outputs.data }}' | jq -r '.prompt')
-          
           cat > call-claude.js << 'ENDOFSCRIPT'
           const https = require('https');
-          
-          const prompt = process.env.PROMPT;
-          
+
+          const parseData = JSON.parse(process.env.PARSE_DATA);
+          const prompt = parseData.prompt;
+
           const requestData = JSON.stringify({
             model: "claude-sonnet-4-20250514",
             max_tokens: 32000,
@@ -79,7 +124,7 @@ jobs:
               content: prompt + '\n\n以下のJSON形式で出力してください（JSONのみ、説明不要）:\n\n{\n  "repo_name": "リポジトリ名",\n  "description": "1行の説明",\n  "files": {\n    "README.md": "内容",\n    ".github/workflows/claude-feature.yml": "上記の完全なワークフロー内容",\n    ".github/ISSUE_TEMPLATE/feature_request.yml": "機能リクエストテンプレート",\n    ".github/ISSUE_TEMPLATE/bug_report.yml": "バグ報告テンプレート",\n    ".github/ISSUE_TEMPLATE/enhancement.yml": "改善提案テンプレート",\n    "src/index.js": "内容"\n  }\n}\n\n必須ファイル：\n- .github/workflows/claude-feature.yml（上記の Enhanced 版ワークフロー）\n- .github/ISSUE_TEMPLATE/feature_request.yml\n- .github/ISSUE_TEMPLATE/bug_report.yml\n- .github/ISSUE_TEMPLATE/enhancement.yml\n\nこれらは必ず含めてください。ワークフローは上記の仕様通りに作成してください。'
             }]
           });
-          
+
           const options = {
             hostname: 'api.anthropic.com',
             port: 443,
@@ -92,26 +137,26 @@ jobs:
               'anthropic-version': '2023-06-01'
             }
           };
-          
+
           const req = https.request(options, (res) => {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
               try {
                 const response = JSON.parse(body);
-                
+
                 if (response.error) {
                   console.error('API Error:', response.error);
                   process.exit(1);
                 }
-                
+
                 if (!response.content || !response.content[0]) {
                   console.error('Invalid response structure');
                   process.exit(1);
                 }
-                
+
                 const content = response.content[0].text;
-                
+
                 const jsonMatch = content.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
                   try {
@@ -131,23 +176,22 @@ jobs:
               }
             });
           });
-          
+
           req.on('error', (e) => {
             console.error('Request error:', e.message);
             process.exit(1);
           });
-          
+
           req.write(requestData);
           req.end();
           ENDOFSCRIPT
-          
-          export PROMPT="$PROMPT"
+
           CLAUDE_OUTPUT=$(node call-claude.js)
-          
+
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$CLAUDE_OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-      
+
       - name: Create repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
@@ -156,17 +200,17 @@ jobs:
         run: |
           REPO_NAME=$(echo "$CLAUDE_OUTPUT" | jq -r '.repo_name')
           REPO_DESC=$(echo "$CLAUDE_OUTPUT" | jq -r '.description')
-          
+
           curl -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/user/repos \
             -d "{\"name\":\"$REPO_NAME\",\"description\":\"$REPO_DESC\",\"private\":$([ "$VISIBILITY" = "private" ] && echo true || echo false),\"auto_init\":false}"
-          
+
           sleep 2
-          
+
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
-      
+
       - name: Clone and setup repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
@@ -174,30 +218,30 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           REPO_NAME="${{ env.REPO_NAME }}"
-          
+
           git config --global user.name "Claude Bot"
           git config --global user.email "claude-bot@github-actions"
           git config --global init.defaultBranch master
-          
+
           mkdir -p /tmp/new-repo
           cd /tmp/new-repo
           git init
           git branch -M master
-          
+
           echo "$CLAUDE_OUTPUT" | jq -r '.files | to_entries[] | @json' | while read -r entry; do
             filepath=$(echo "$entry" | jq -r '.key')
             content=$(echo "$entry" | jq -r '.value')
             mkdir -p "$(dirname "$filepath")"
             echo "$content" > "$filepath"
           done
-          
+
           git add .
           git commit -m "Initial commit from Issue #${{ github.event.issue.number }}"
           git remote add origin "https://$GITHUB_TOKEN@github.com/${{ github.repository_owner }}/$REPO_NAME.git"
           git push -u origin master
-          
+
           echo "REPO_URL=https://github.com/${{ github.repository_owner }}/$REPO_NAME" >> $GITHUB_ENV
-      
+
       - name: Setup Secrets in new repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
@@ -205,88 +249,88 @@ jobs:
         run: |
           REPO_NAME="${{ env.REPO_NAME }}"
           OWNER="${{ github.repository_owner }}"
-          
+
           PUBLIC_KEY_RESPONSE=$(curl -s \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/public-key")
-          
+
           PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
           KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
-          
+
           cat > encrypt-secret.js << 'ENCRYPTSCRIPT'
           const sodium = require('libsodium-wrappers');
-          
+
           (async () => {
             await sodium.ready;
-            
+
             const publicKey = process.env.PUBLIC_KEY;
             const secret = process.env.SECRET_VALUE;
-            
+
             const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
             const binsec = sodium.from_string(secret);
-            
+
             const encBytes = sodium.crypto_box_seal(binsec, binkey);
             const output = sodium.to_base64(encBytes, sodium.base64_variants.ORIGINAL);
-            
+
             console.log(output);
           })();
           ENCRYPTSCRIPT
-          
+
           npm install libsodium-wrappers
-          
+
           export PUBLIC_KEY="$PUBLIC_KEY"
           export SECRET_VALUE="$ANTHROPIC_API_KEY"
           ENCRYPTED_VALUE=$(node encrypt-secret.js)
-          
+
           curl -X PUT \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/secrets/ANTHROPIC_API_KEY" \
             -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}"
-          
-          echo "✅ ANTHROPIC_API_KEY has been added to $REPO_NAME"
-      
+
+          echo "ANTHROPIC_API_KEY has been added to $REPO_NAME"
+
       - name: Create labels in new repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           REPO_NAME="${{ env.REPO_NAME }}"
           OWNER="${{ github.repository_owner }}"
-          
+
           curl -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
             -d '{"name":"feature","description":"New feature or request","color":"0e8a16"}'
-          
+
           curl -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
             -d '{"name":"bug","description":"Something is not working","color":"d73a4a"}'
-          
+
           curl -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
             -d '{"name":"enhancement","description":"Improvement to existing feature","color":"a2eeef"}'
-          
+
           curl -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/labels" \
             -d '{"name":"refactor","description":"Code refactoring","color":"fbca04"}'
-          
-          echo "✅ Labels created in $REPO_NAME"
-      
+
+          echo "Labels created in $REPO_NAME"
+
       - name: Configure Actions permissions in new repository
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           REPO_NAME="${{ env.REPO_NAME }}"
           OWNER="${{ github.repository_owner }}"
-          
+
           curl -X PUT \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/$OWNER/$REPO_NAME/actions/permissions/workflow" \
             -d '{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}'
-          
-          echo "✅ Actions permissions configured for $REPO_NAME"
-      
+
+          echo "Actions permissions configured for $REPO_NAME"
+
       - name: Comment on issue
         uses: actions/github-script@v7
         with:
@@ -297,9 +341,9 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## ✅ リポジトリが作成されました！\n\n🔗 [${repoUrl}](${repoUrl})\n\n### 🤖 Enhanced AI機能が有効化されています\n\n新しいリポジトリでIssueを作成すると、Claudeが既存コードを読み取り、自動でコード変更・追加・削除を行ってPull Requestを作成します。\n\n**新機能：**\n- ✅ 既存ファイルの編集に対応\n- ✅ ファイルの追加・削除に対応\n- ✅ リファクタリングに対応\n- ✅ バグ修正に対応\n\n**使い方：**\n1. 新しいリポジトリでIssueを作成\n2. "feature", "bug", "enhancement", "refactor" のいずれかのラベルを追加\n3. 実装してほしい機能や修正内容を記述\n4. 数分後、自動でPRが作成されます！\n\nClaudeによって自動生成されました。`
+              body: `## リポジトリが作成されました！\n\n[${repoUrl}](${repoUrl})\n\n### AI機能が有効化されています\n\n新しいリポジトリでIssueを作成すると、Claudeが既存コードを読み取り、自動でコード変更・追加・削除を行ってPull Requestを作成します。\n\n**新機能：**\n- 既存ファイルの編集に対応\n- ファイルの追加・削除に対応\n- リファクタリングに対応\n- バグ修正に対応\n\n**使い方：**\n1. 新しいリポジトリでIssueを作成\n2. "feature", "bug", "enhancement", "refactor" のいずれかのラベルを追加\n3. 実装してほしい機能や修正内容を記述\n4. 数分後、自動でPRが作成されます！\n\nClaudeによって自動生成されました。`
             });
-            
+
             await github.rest.issues.update({
               issue_number: context.issue.number,
               owner: context.repo.owner,

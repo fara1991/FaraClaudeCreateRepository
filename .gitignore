@@ -1,0 +1,27 @@
+# IDE
+.idea/
+.vs/
+.vscode/
+*.suo
+*.user
+*.DotSettings.user
+
+# Node.js
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment / Secrets
+.env
+.env.*
+
+# Claude Code (local settings)
+.claude/
+
+# Editor temp files
+*.swp
+*.tmp
+*~
