@@ -71,22 +71,6 @@ body:
       required: true
       
   - type: textarea
-    id: description
-    attributes:
-      label: プロジェクトの説明
-      description: どんなアプリを作りたいか、詳しく説明してください
-      placeholder: |
-        例：
-        ToDoリストアプリを作成したい。
-        機能：
-        - タスクの追加・削除・編集
-        - 優先度設定
-        - 期限管理
-        - ダークモード対応
-    validations:
-      required: true
-      
-  - type: textarea
     id: features
     attributes:
       label: 必要な機能（任意）
@@ -95,6 +79,14 @@ body:
         - ユーザー認証
         - データベース連携
         - API連携
+        - ファイルアップロード
+        - リアルタイム通知（WebSocket）
+        - 検索機能
+        - 多言語対応（i18n）
+        - ダークモード
+        - レスポンシブデザイン
+        - メール送信
+        - 管理者画面
         
   - type: dropdown
     id: visibility
@@ -120,20 +112,17 @@ body:
     validations:
       required: true
       
-  - type: checkboxes
-    id: additional_files
+  - type: dropdown
+    id: docker
     attributes:
-      label: 追加ファイル
-      description: 含めてほしいファイルを選択
+      label: Docker設定
+      description: Dockerfile と docker-compose.yml を含め、docker compose up -d で動作する環境を構築します
       options:
-        - label: README.md（詳細な説明付き）
-          required: false
-        - label: .gitignore
-          required: false
-        - label: Docker設定
-          required: false
-        - label: CI/CD設定
-          required: false
+        - 含める
+        - 含めない
+      default: 0
+    validations:
+      required: true
           
   - type: textarea
     id: notes

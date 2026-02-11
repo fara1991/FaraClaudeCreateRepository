@@ -30,10 +30,12 @@ jobs:
         id: parse-issue
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
         run: |
           cat > parse-issue.js << 'ENDOFSCRIPT'
           const fs = require('fs');
           const issueBody = process.env.ISSUE_BODY;
+          const issueTitle = (process.env.ISSUE_TITLE || '').replace(/^\[PROJECT\]\s*/, '');
 
           const extractField = (label) => {
             const regex = new RegExp('### ' + label + '\\s*([\\s\\S]*?)(?=\\n###|$)', 'i');
@@ -44,11 +46,13 @@ jobs:
           const repoName = extractField('リポジトリ名');
           const projectType = extractField('プロジェクトタイプ');
           const techStack = extractField('技術スタック');
-          const description = extractField('プロジェクトの説明');
           const features = extractField('必要な機能（任意）');
           const visibility = extractField('リポジトリの公開設定');
           const license = extractField('ライセンス');
+          const docker = extractField('Docker設定');
           const notes = extractField('その他の要望（任意）');
+
+          const includeDocker = docker === '含める';
 
           const workflowTemplate = fs.readFileSync('templates/claude-feature-workflow.yml', 'utf8').replace(/\r/g, '');
 
@@ -58,11 +62,28 @@ jobs:
             '- プロジェクトタイプ: ' + projectType + '\n' +
             '- 技術スタック: ' + techStack + '\n' +
             '- ライセンス: ' + license + '\n\n' +
-            '## プロジェクトの説明\n' + description + '\n\n' +
+            '## プロジェクトの説明\n' + issueTitle + '\n\n' +
             (features ? '## 必要な機能\n' + features + '\n\n' : '') +
             (notes ? '## その他の要望\n' + notes + '\n\n' : '') +
             '完全に動作するプロジェクトを作成してください。\n' +
-            'README.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n\n' +
+            'README.mdには詳細なセットアップ手順とプロジェクトの説明を含めてください。\n' +
+            '.gitignore はプロジェクトに適した内容で作成してください。\n\n' +
+            (includeDocker ?
+              '## 重要：Docker設定を含める\n\n' +
+              '以下のファイルを必ず含めてください：\n' +
+              '- Dockerfile\n' +
+              '- docker-compose.yml\n\n' +
+              '`docker compose up -d` コマンドを実行するだけでアプリケーションが起動するように構成してください。\n' +
+              '技術スタック「' + techStack + '」に適したDockerイメージとコマンドを使用してください。\n' +
+              '例：\n' +
+              '- React/Next.js/Vue.js/Angular → node イメージ、npm start / npm run dev\n' +
+              '- Python FastAPI/Flask/Django → python イメージ、uvicorn / gunicorn\n' +
+              '- C# / .NET (Blazor) → mcr.microsoft.com/dotnet/sdk イメージ、dotnet run\n' +
+              '- Go → golang イメージ、go run\n' +
+              '- Java Spring Boot → eclipse-temurin イメージ、./gradlew bootRun or java -jar\n' +
+              '- Ruby on Rails → ruby イメージ、rails server\n' +
+              '- PHP Laravel → php イメージ + composer、php artisan serve\n\n'
+            : '') +
             '## 重要：GitHub Actions ワークフローを含める\n\n' +
             '以下のファイルを必ず含めてください：\n\n' +
             '.github/workflows/claude-feature.yml\n\n' +
