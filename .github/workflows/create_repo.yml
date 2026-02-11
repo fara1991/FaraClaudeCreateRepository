@@ -49,10 +49,10 @@ jobs:
           const features = extractField('必要な機能（任意）');
           const visibility = extractField('リポジトリの公開設定');
           const license = extractField('ライセンス');
-          const docker = extractField('Docker設定');
+          const additionalFiles = extractField('追加ファイル');
           const notes = extractField('その他の要望（任意）');
 
-          const includeDocker = docker === '含める';
+          const includeDocker = /\[x\]\s*Docker設定/i.test(additionalFiles);
 
           const workflowTemplate = fs.readFileSync('templates/claude-feature-workflow.yml', 'utf8').replace(/\r/g, '');
 

@@ -112,17 +112,18 @@ body:
     validations:
       required: true
       
-  - type: dropdown
-    id: docker
+  - type: checkboxes
+    id: additional_files
     attributes:
-      label: Docker設定
-      description: Dockerfile と docker-compose.yml を含め、docker compose up -d で動作する環境を構築します
+      label: 追加ファイル
+      description: 含めてほしいファイルを選択
       options:
-        - 含める
-        - 含めない
-      default: 0
-    validations:
-      required: true
+        - label: README.md（詳細な説明付き）
+          required: false
+        - label: .gitignore
+          required: false
+        - label: Docker設定
+          required: false
           
   - type: textarea
     id: notes
