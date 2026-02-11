@@ -52,7 +52,7 @@ jobs:
           const additionalFiles = extractField('追加ファイル');
           const notes = extractField('その他の要望（任意）');
 
-          const includeDocker = /\[x\]\s*Docker設定/i.test(additionalFiles);
+          const includeDocker = /\[x\]\s*Dockerfile/i.test(additionalFiles);
 
           const workflowTemplate = fs.readFileSync('templates/claude-feature-workflow.yml', 'utf8').replace(/\r/g, '');
 

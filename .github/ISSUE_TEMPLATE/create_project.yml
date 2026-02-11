@@ -122,7 +122,7 @@ body:
           required: false
         - label: .gitignore
           required: false
-        - label: Docker設定
+        - label: Dockerfile
           required: false
           
   - type: textarea
